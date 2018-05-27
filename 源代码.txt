@@ -1,0 +1,331 @@
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
+import android.support.v7.app.AppCompatActivity;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.baidu.location.BDAbstractLocationListener;
+import com.baidu.location.BDLocation;
+import com.baidu.location.BDLocationListener;
+import com.baidu.location.LocationClient;
+import com.baidu.location.LocationClientOption;
+import com.baidu.mapapi.SDKInitializer;
+import com.baidu.mapapi.map.BaiduMap;
+import com.baidu.mapapi.map.MapStatusUpdate;
+import com.baidu.mapapi.map.MapStatusUpdateFactory;
+import com.baidu.mapapi.map.MapView;
+import com.baidu.mapapi.map.MyLocationData;
+import com.baidu.mapapi.model.LatLng;
+
+import java.util.ArrayList;
+import java.util.List;
+
+
+public class MainActivity extends AppCompatActivity {
+
+    public LocationClient mLocationClient = null;
+    private MyLocationListener myLocationListener = new MyLocationListener();
+    private MapView mapView;
+    private BaiduMap baiduMap;
+    private boolean isFirstLocate = true;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        mLocationClient = new LocationClient(getApplicationContext());  //声明LocationClient类，获取全进程有效的Context
+        mLocationClient.registerLocationListener(myLocationListener); //注册一个定位监听器，当获取到位置信息时，会回调
+        SDKInitializer.initialize(getApplicationContext()); //初始化
+        setContentView(R.layout.activity_main);
+        mapView = (MapView)findViewById(R.id.mmap); //获取MapView的实例
+        baiduMap = mapView.getMap();
+        baiduMap.setMyLocationEnabled(true);
+        baiduMap.setIndoorEnable(true);
+        //positionText = (TextView)findViewById(R.id.position_text_view);
+
+        List<String>permissionList = new ArrayList<>(); //创建一个空List集合，依次判断后面三个权限有没有被授权，如果没有，则加入List集合中
+        if(ContextCompat.checkSelfPermission(MainActivity.this,Manifest.permission.ACCESS_FINE_LOCATION)!= PackageManager.PERMISSION_GRANTED){
+            permissionList.add(Manifest.permission.ACCESS_FINE_LOCATION);   //通过GPS芯片接收卫星的定位信息，定位精度达10米以内
+        }
+
+        if(ContextCompat.checkSelfPermission(MainActivity.this,Manifest.permission.READ_PHONE_STATE)!=PackageManager.PERMISSION_GRANTED){
+            permissionList.add(Manifest.permission.READ_PHONE_STATE);   //访问电话状态
+        }
+
+        if(ContextCompat.checkSelfPermission(MainActivity.this,Manifest.permission.WRITE_EXTERNAL_STORAGE)!=PackageManager.PERMISSION_GRANTED){
+            permissionList.add(Manifest.permission.WRITE_EXTERNAL_STORAGE); //允许程序写入外部存储，如SD卡上写文件
+        }
+
+        if(!permissionList.isEmpty()){
+            String[] permissions = permissionList.toArray(new String[permissionList.size()]);   //将List集合转化为数组
+            ActivityCompat.requestPermissions(MainActivity.this,permissions,1); //一次性申请LIst集合中的权限
+
+        }else{
+            requestLocation();  //地理位置定位
+        }
+
+    }
+
+    //对MapView进行管理，保证资源能够及时释放
+    @Override
+    protected void onResume(){
+        super.onResume();
+        mapView.onResume();
+    }
+
+    @Override
+    protected void onPause(){
+        super.onPause();
+        mapView.onPause();
+    }
+
+    @Override
+    protected void onDestroy(){
+        super.onDestroy();
+        mLocationClient.stop(); //活动被销毁时，停止定位
+        mapView.onDestroy();
+        baiduMap.setMyLocationEnabled(false);
+    }
+
+    private void requestLocation(){
+        initLocation();
+        mLocationClient.start();    //发起定位请求
+    }
+
+    private void initLocation(){
+        LocationClientOption option = new LocationClientOption();
+        option.setLocationMode(LocationClientOption.LocationMode.Hight_Accuracy);   //高精度模式表示允许使用GPS、无线网络、蓝牙或移动网络来进行定位
+        //option.setLocationMode(LocationClientOption.LocationMode.Battery_Saving);    //节电模式，只会使用网络进行定位
+        //option.setLocationMode(LocationClientOption.LocationMode.Device_Sensors);   //仅使用设备
+        //option.setCoorType("gcj02");
+        option.setScanSpan(1000);   //1秒更新当前位置
+        option.setOpenGps(true);
+        //option.setLocationNotify(true);
+        //option.setIgnoreKillProcess(true);
+        option.setIsNeedAddress(true);
+        mLocationClient.setLocOption(option);   //将配置好的LocationClientOption对象，通过setLocOption方法传递给LocationClient对象使用
+    }
+
+
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, int[] grantResults){
+        switch (requestCode){
+            case 1:
+                if(grantResults.length>0){
+                    for(int result : grantResults){
+                        if(result!=PackageManager.PERMISSION_GRANTED){
+                            Toast.makeText(this,"同意所有权限才能正常使用本程序",Toast.LENGTH_SHORT).show();
+                            finish();   //如果有权限被拒绝，就关闭程序
+                            return;
+                        }
+                    }
+                    requestLocation();  //重新请求定位
+                }else{
+                    Toast.makeText(this, "发生未知错误", Toast.LENGTH_SHORT).show();
+                    finish();
+                }
+                break;
+            default:
+
+        }
+    }
+
+    private void navigateTo(BDLocation location){
+        if(isFirstLocate){
+            //将BDLocation对象中的地理位置信息取出并封装到LatLng对象中
+            LatLng ll = new LatLng(location.getLatitude(),location.getLongitude());
+            MapStatusUpdate update = MapStatusUpdateFactory.newLatLng(ll);
+            //baiduMap.setMapType(BaiduMap.MAP_TYPE_NORMAL);
+            baiduMap.animateMapStatus(update);
+            //设置缩放级别
+            update = MapStatusUpdateFactory.zoomTo(18f);
+            //将对象传入该方法中可完成缩放功能
+            baiduMap.animateMapStatus(update);
+            isFirstLocate = false;
+        }
+        MyLocationData.Builder locationBuilder = new MyLocationData.Builder();
+        locationBuilder.latitude(location.getLatitude());
+        locationBuilder.longitude(location.getLongitude());
+        MyLocationData locationData = locationBuilder.build();
+        baiduMap.setMyLocationData(locationData);
+    }
+
+    public class MyLocationListener implements BDLocationListener {
+        /*
+                @Override
+                public void onReceiveLocation(final BDLocation location){
+                    currentPosition = new StringBuilder();
+                    currentPosition.append("纬度：").append(location.getLatitude()).append("\n");
+                    currentPosition.append("经度：").append(location.getLongitude()).append("\n");
+                    currentPosition.append("位置：").append(location.getAddrStr()).append("\n");
+                    currentPosition.append("国家：").append(location.getCountry()).append("\n");
+                    currentPosition.append("省：").append(location.getProvince()).append("\n");
+                    currentPosition.append("市：").append(location.getCity()).append("\n");
+                    currentPosition.append("区：").append(location.getDistrict()).append("\n");
+                    currentPosition.append("街道：").append(location.getStreet()).append("\n");
+                    currentPosition.append("定位方式：");
+                    if(location.getLocType()==BDLocation.TypeGpsLocation){
+                        currentPosition.append("GPS");
+                    }
+                    else if(location.getLocType()==BDLocation.TypeNetWorkException){
+                        currentPosition.append("网络");
+                    }
+
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            positionText.setText(currentPosition);
+                        }
+                    });
+                }
+        */
+        @Override
+        public void onReceiveLocation(BDLocation location){
+            if(location.getLocType()==BDLocation.TypeGpsLocation||location.getLocType()==BDLocation.TypeNetWorkException){
+                //传入自己的位置
+                navigateTo(location);
+            }
+        }
+
+    }
+
+}
+
+<com.baidu.mapapi.map.MapView
+            android:id="@+id/mmap"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clickable="true"/>
+
+
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
+import android.support.v7.app.AppCompatActivity;
+import android.util.Log;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.baidu.location.BDAbstractLocationListener;
+import com.baidu.location.BDLocation;
+import com.baidu.location.BDLocationListener;
+import com.baidu.location.LocationClient;
+import com.baidu.location.LocationClientOption;
+import com.baidu.location.Poi;
+import com.baidu.mapapi.SDKInitializer;
+import com.baidu.mapapi.map.BaiduMap;
+import com.baidu.mapapi.map.MapStatusUpdate;
+import com.baidu.mapapi.map.MapStatusUpdateFactory;
+import com.baidu.mapapi.map.MapView;
+import com.baidu.mapapi.model.LatLng;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class MainActivity extends AppCompatActivity {
+    private TextView positionText;
+    public LocationClient mLocationClient = null;
+    public BDLocationListener myListener = new MyLocationListener();
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        positionText = (TextView)findViewById(R.id.position_text_view);
+        startLocate();
+    }
+
+    /**
+     * 定位
+     */
+    private void startLocate() {
+        mLocationClient = new LocationClient(getApplicationContext());     //声明LocationClient类
+        mLocationClient.registerLocationListener(myListener);    //注册监听函数
+        LocationClientOption option = new LocationClientOption();
+        option.setLocationMode(LocationClientOption.LocationMode.Battery_Saving
+        );//可选，默认高精度，设置定位模式，高精度，低功耗，仅设备
+        option.setCoorType("bd09ll");//可选，默认gcj02，设置返回的定位结果坐标系
+        int span = 1000;
+        option.setScanSpan(span);//可选，默认0，即仅定位一次，设置发起定位请求的间隔需要大于等于1000ms才是有效的
+        option.setIsNeedAddress(true);//可选，设置是否需要地址信息，默认不需要
+        option.setOpenGps(true);//可选，默认false,设置是否使用gps
+        option.setLocationNotify(true);//可选，默认false，设置是否当GPS有效时按照1S/1次频率输出GPS结果
+        option.setIsNeedLocationDescribe(true);//可选，默认false，设置是否需要位置语义化结果，可以在BDLocation.getLocationDescribe里得到，结果类似于“在北京天安门附近”
+        option.setIsNeedLocationPoiList(true);//可选，默认false，设置是否需要POI结果，可以在BDLocation.getPoiList里得到
+        option.setIgnoreKillProcess(false);//可选，默认true，定位SDK内部是一个SERVICE，并放到了独立进程，设置是否在stop的时候杀死这个进程，默认不杀死
+        option.SetIgnoreCacheException(false);//可选，默认false，设置是否收集CRASH信息，默认收集
+        option.setEnableSimulateGps(false);//可选，默认false，设置是否需要过滤GPS仿真结果，默认需要
+        mLocationClient.setLocOption(option);
+        //开启定位
+        mLocationClient.start();
+    }
+
+    private class MyLocationListener implements BDLocationListener {
+
+        @Override
+        public void onReceiveLocation(final BDLocation location) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    StringBuilder sb = new StringBuilder(256);
+                    sb.append("time : ");
+                    sb.append(location.getTime());
+                    sb.append("\nerror code : ");
+                    sb.append(location.getLocType());
+                    sb.append("\nlatitude : ");
+                    sb.append(location.getLatitude());
+                    sb.append("\nlontitude : ");
+                    sb.append(location.getLongitude());
+                    sb.append("\nradius : ");
+                    sb.append(location.getRadius());
+                    if (location.getLocType() == BDLocation.TypeGpsLocation) {// GPS定位结果
+                        sb.append("\nspeed : ");
+                        sb.append(location.getSpeed());// 单位：公里每小时
+                        sb.append("\nsatellite : ");
+                        sb.append(location.getSatelliteNumber());
+                        sb.append("\nheight : ");
+                        sb.append(location.getAltitude());// 单位：米
+                        sb.append("\ndirection : ");
+                        sb.append(location.getDirection());// 单位度
+                        sb.append("\naddr : ");
+                        sb.append(location.getAddrStr());
+                        sb.append("\ndescribe : ");
+                        sb.append("gps定位成功");
+
+                    } else if (location.getLocType() == BDLocation.TypeNetWorkLocation) {// 网络定位结果
+                        sb.append("\naddr : ");
+                        sb.append(location.getAddrStr());
+                        //运营商信息
+                        sb.append("\noperationers : ");
+                        sb.append(location.getOperators());
+                        sb.append("\ndescribe : ");
+                        sb.append("网络定位成功");
+                    } else if (location.getLocType() == BDLocation.TypeOffLineLocation) {// 离线定位结果
+                        sb.append("\ndescribe : ");
+                        sb.append("离线定位成功，离线定位结果也是有效的");
+                    } else if (location.getLocType() == BDLocation.TypeServerError) {
+                        sb.append("\ndescribe : ");
+                        sb.append("服务端网络定位失败，可以反馈IMEI号和大体定位时间到loc-bugs@baidu.com，会有人追查原因");
+                    } else if (location.getLocType() == BDLocation.TypeNetWorkException) {
+                        sb.append("\ndescribe : ");
+                        sb.append("网络不同导致定位失败，请检查网络是否通畅");
+                    } else if (location.getLocType() == BDLocation.TypeCriteriaException) {
+                        sb.append("\ndescribe : ");
+                        sb.append("无法获取有效定位依据导致定位失败，一般是由于手机的原因，处于飞行模式下一般会造成这种结果，可以试着重启手机");
+                    }
+                    sb.append("\nlocationdescribe : ");
+                    sb.append(location.getLocationDescribe());// 位置语义化信息
+                    positionText.setText(sb);
+                }
+            });
+        }
+    }
+
+}
